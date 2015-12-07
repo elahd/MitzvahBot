@@ -18,13 +18,11 @@ from nap.url import Url # For Hebcal & Geonames API requests
 
 # USER CONFIGURABLE VARIABLES. SET BEFORE RUNNING.
 cfg_zipcode = 'ENTER ZIPCODE' # Your United States zipcode. No support for international locations.
-cfg_geonames_username = 'ENTER GEONAMES API USERNAME' # Username for geonames.org API.
 cfg_twitter = twitter.Api(consumer_key='GET FROM APP.TWITTER.COM',
                       consumer_secret='GET FROM APP.TWITTER.COM',
                       access_token_key='GET FROM APP.TWITTER.COM',
                       access_token_secret='GET FROM APP.TWITTER.COM') # Register your own Twitter app at https://apps.twitter.com/. Twitter will provide these API keys.
 cfg_arduino_port = 'ENTER PORT NAME' # Your arduino serial port name. Example: /dev/ttyACM0.
-cfg_lighting_offet = 10 # Light candles this many minutes after sunset.
 cfg_extinguish_after = 4 # Extinguish candles this many hours after they were lit.
 
 # Debugging variables. Modify as needed.
@@ -135,26 +133,7 @@ def extinguishCandles():
 		raise ProcessError("Could not send extinguish command to Arduino.")
 		return
 
-def getLatLong (p_zipcode):
-	# Get lat and long from zipcode using geocoder.us.
-	try:
-		geodata = requests.get('http://geocoder.us/service/csv/geocode?zip=' + p_zipcode) #returns lat, long, city, st, zip
-	except requests.exceptions.RequestException as e:
-		raise RemoteFetchError("Completely failed to get data from Geocoder. Response was %s" % e)
-	else:
-		var_geodata = geodata.content.split(',')
-
-	# Make sure we got data that looks like lat/long. Should probably use a regex for this.
-	try:
-		isinstance(var_geodata[0], (long, int))
-		isinstance(var_geodata[1], (long, int))
-	except TypeError:
-		raise RemoteFetchError("Got bad coordinate data from Geocoder. Response was %s" % e)
-	else:
-		print ('Using US zipcode ' + p_zipcode + ', located at ' + var_geodata[0] + ',' + var_geodata[1] + '.')
-		return var_geodata[0], var_geodata[1]
-
-def getLightingTimes (p_zipcode, p_latitude, p_longitude, p_lightingOffset):
+def getLightingTimes (p_zipcode):
 	# Get all holidays for current year from hebcal.com
 	try:
 		api_hebcal = Url('http://www.hebcal.com/')
@@ -162,7 +141,6 @@ def getLightingTimes (p_zipcode, p_latitude, p_longitude, p_lightingOffset):
 			params={
 				'v': '1'
 				,'cfg': 'json'
-				,'nh': 'on'
 				,'nx': 'off'
 				,'year': 'now'
 				,'month': 'x'
@@ -172,6 +150,10 @@ def getLightingTimes (p_zipcode, p_latitude, p_longitude, p_lightingOffset):
 				,'zip': p_zipcode
 				,'m': '0'
 				,'s': 'off'
+				,'geo': 'zip'
+				,'maj': 'on'
+				,'min': 'off'
+				,'mod': 'off'
 			})
 	except requests.exceptions.HTTPError as e:
 	    raise RemoteFetchError("Completely failed to get data from Hebcal. Response was %s" % e)
@@ -183,30 +165,13 @@ def getLightingTimes (p_zipcode, p_latitude, p_longitude, p_lightingOffset):
 	# Find all nights of Chanukah (by searching holiday titles)...
 	# print 'Candle lighting schedule:'
 	for obj_holiday in obj_holidays['items']:
-		if re.match('^Chanukah[a-zA-Z0-9_: ]*Candle[s]?$', obj_holiday['title']):
-			# ...and get sunset times for those nights from geonames.
-			try:
-				api_geonames = Url('http://api.geonames.org/')
-				response_geonames = api_geonames.get('timezoneJSON', params={
-						'lat': p_latitude
-						,'lng': p_longitude
-						,'date': obj_holiday['date']
-						,'username': cfg_geonames_username
-					})
-			except requests.exceptions.HTTPError as e:
-			    raise RemoteFetchError("Completely failed to get sunset data from Geonames. Response was %s" % e)
-			    return
-			else:
-				# Status indicates that Geonames is returning an error.
-				if 'status' in response_geonames.json():
-					raise RemoteFetchError("Geonames returned an error message. Response was %s" % (response_geonames.json()['status'] + '\n' + params_used))
-					return
-				else:
-					# Store candle lighting time, calculated by adding p_lightingOffset to sunset time.
-					datetime_sunset = datetime.strptime(response_geonames.json()['dates'][0]['sunset'], '%Y-%m-%d %H:%M')
-					lighting_time = datetime_sunset + timedelta(minutes=p_lightingOffset)
-					candle_lighting.append(lighting_time)
-					# print lighting_time
+		if re.match('^Chanukah[a-zA-Z0-9_: ]*Candle[s]?', obj_holiday['title']):
+			# ...and get sunset times for those nights from the hebcal response
+			# Remove time zone info from datetime string. Python doesn't like time zone info.
+			obj_holiday['date'] = obj_holiday['date'][:-6]
+			# Store candle lighting time
+			candle_lighting.append(datetime.strptime(obj_holiday['date'], '%Y-%m-%dT%H:%M:%S'))
+	# TODO: Add a check here to make sure we actually found candle lighting times.
 	return candle_lighting
 
 def tweet (api, message):
@@ -263,8 +228,7 @@ def main():
 			var_lighting_times.append(datetime.now() + timedelta(seconds=(16*index)))
 	else:
 		try:
-			cfg_latitude, cfg_longitude = getLatLong(cfg_zipcode)
-			var_lighting_times = getLightingTimes(cfg_zipcode, cfg_latitude, cfg_longitude, cfg_lighting_offet)
+			var_lighting_times = getLightingTimes(cfg_zipcode)
 		except RemoteFetchError as e:
 			print ("%s.\nFailed to initialize dates. Exiting." % e)
 			exit()
