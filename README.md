@@ -27,6 +27,6 @@ My bot Tweets to [@MitzvahBot](https://www.twitter.com/MitzvahBot)
 ## Changelog
 ### v1.1 2015-12-06
 Some APIs changed since last year; updated code accordingly.
-1. Removed Geonames integration.
+1. Removed Geonames integration. No longer necessary to to enhancements to hebcal.org API.
 2. Pull candle lighting times directly from hebcal.org instead of using sunset times.
 3. Removed sunset offset setting.
